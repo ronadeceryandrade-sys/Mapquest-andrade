@@ -1,1 +1,222 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Route Map + Live Details</title>
 
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial;
+      display: flex;
+      height: 100vh;
+      background: #eef2f7;
+    }
+
+    #sidebar {
+      width: 360px;
+      background: white;
+      padding: 15px;
+      overflow-y: auto;
+      box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+    }
+
+    #map {
+      flex: 1;
+    }
+
+    input {
+      width: 100%;
+      padding: 10px;
+      margin: 6px 0;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+    }
+
+    button {
+      width: 100%;
+      padding: 10px;
+      background: #007bff;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #0056b3;
+    }
+
+    .route-box {
+      background: white;
+      margin-top: 12px;
+      padding: 15px;
+      border-radius: 12px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    }
+
+    .route-title {
+      font-size: 18px;
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th {
+      background: #007bff;
+      color: white;
+      padding: 10px;
+      text-align: left;
+    }
+
+    td {
+      padding: 10px;
+      border-bottom: 1px solid #eee;
+    }
+
+    tr:hover td {
+      background: #f1f7ff;
+    }
+
+    td:nth-child(2) {
+      font-weight: bold;
+    }
+  </style>
+</head>
+
+<body>
+
+<div id="sidebar">
+  <h2>Route Finder</h2>
+
+  <input id="start" placeholder="Start location">
+  <input id="end" placeholder="Destination">
+  <button onclick="getRoute()">Get Route</button>
+
+  <div id="result"></div>
+</div>
+
+<div id="map"></div>
+
+<script>
+  // 🌍 INIT MAP
+  var map = L.map('map').setView([8.4542, 124.6319], 10);
+
+  // 🎨 GOOGLE-LIKE COLORED MAP
+  L.tileLayer('https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+    subdomains:['mt0','mt1','mt2','mt3']
+  }).addTo(map);
+
+  let routeLayer;
+  let startMarker, endMarker;
+
+  // 📍 GEOCODE FUNCTION
+  async function geocode(place) {
+    let res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(place)}`);
+    let data = await res.json();
+
+    if (!data.length) return null;
+
+    return {
+      lat: parseFloat(data[0].lat),
+      lng: parseFloat(data[0].lon)
+    };
+  }
+
+  // 🚗 ROUTE FUNCTION
+  async function getRoute() {
+
+    let start = document.getElementById("start").value;
+    let end = document.getElementById("end").value;
+
+    if (!start || !end) {
+      alert("Please enter start and destination");
+      return;
+    }
+
+    document.getElementById("result").innerHTML = `
+      <div class="route-box">
+        <div class="route-title">📍 Route Details</div>
+
+        <table>
+          <tr><th>Item</th><th>Details</th></tr>
+          <tr><td>🟢 Start</td><td>Loading...</td></tr>
+          <tr><td>🔴 Destination</td><td>Loading...</td></tr>
+          <tr><td>📏 Distance</td><td>Calculating...</td></tr>
+          <tr><td>⏱️ Time</td><td>Calculating...</td></tr>
+        </table>
+      </div>
+    `;
+
+    let s = await geocode(start);
+    let e = await geocode(end);
+
+    if (!s || !e) {
+      alert("Location not found");
+      return;
+    }
+
+    let url = `https://router.project-osrm.org/route/v1/driving/` +
+      `${s.lng},${s.lat};${e.lng},${e.lat}?overview=full&geometries=geojson`;
+
+    let res = await fetch(url);
+    let data = await res.json();
+
+    if (!data.routes || !data.routes.length) {
+      alert("Route failed");
+      return;
+    }
+
+    let route = data.routes[0];
+
+    let distanceKM = (route.distance / 1000).toFixed(2);
+    let timeMin = Math.round(route.duration / 60);
+
+    // REMOVE OLD
+    if (routeLayer) map.removeLayer(routeLayer);
+    if (startMarker) map.removeLayer(startMarker);
+    if (endMarker) map.removeLayer(endMarker);
+
+    // 📍 ADD MARKERS
+    startMarker = L.marker([s.lat, s.lng]).addTo(map)
+      .bindPopup("🟢 Start").openPopup();
+
+    endMarker = L.marker([e.lat, e.lng]).addTo(map)
+      .bindPopup("🔴 Destination");
+
+    // 🎨 BEAUTIFUL ROUTE STYLE
+    routeLayer = L.geoJSON(route.geometry, {
+      style: {
+        color: "#ff3b3b",   // 🔴 RED ROUTE (Google style traffic feel)
+        weight: 7,
+        opacity: 1
+      }
+    }).addTo(map);
+
+    map.fitBounds(routeLayer.getBounds());
+
+    document.getElementById("result").innerHTML = `
+      <div class="route-box">
+        <div class="route-title">Route Details</div>
+
+        <table>
+          <tr><th>Item</th><th>Details</th></tr>
+
+          <tr><td> Start</td><td>${start}</td></tr>
+          <tr><td> Destination</td><td>${end}</td></tr>
+          <tr><td> Distance</td><td>${distanceKM} km</td></tr>
+          <tr><td>Time</td><td>${timeMin} minutes</td></tr>
+        </table>
+      </div>
+    `;
+  }
+</script>
+
+</body>
+</html>
